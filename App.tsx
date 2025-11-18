@@ -1,264 +1,229 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI, Chat } from '@google/genai';
-import { Message, Sender } from './types';
+import { GoogleGenAI, Modality } from '@google/genai';
 
-// --- Helper & UI Components (defined outside App to prevent re-renders) ---
+// --- Types ---
 
-const BotIcon = () => (
-  <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center flex-shrink-0">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white">
-      <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 0 1-14.304 0c-1.978-.292-3.348-2.024-3.348-3.97v-6.02c0-1.946 1.37-3.678 3.348-3.97ZM6.75 8.25a.75.75 0 0 1 .75-.75h9a.75.75 0 0 1 0 1.5h-9a.75.75 0 0 1-.75-.75Zm.75 2.25a.75.75 0 0 0 0 1.5H12a.75.75 0 0 0 0-1.5H7.5Z" clipRule="evenodd" />
-    </svg>
-  </div>
-);
+interface ImageState {
+  file: File;
+  previewUrl: string;
+}
 
-const UserIcon = () => (
-  <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-white">
-      <path fillRule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" clipRule="evenodd" />
-    </svg>
-  </div>
-);
+// --- Helper Functions ---
 
-const CodeBlock: React.FC<{ code: string }> = ({ code }) => {
-  const [isCopied, setIsCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code).then(
-      () => {
-        setIsCopied(true);
-        setTimeout(() => setIsCopied(false), 2000);
-      },
-      (err) => {
-        console.error('Failed to copy code to clipboard: ', err);
-      }
-    );
+const fileToGenerativePart = async (file: File) => {
+  const base64EncodedDataPromise = new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+    reader.readAsDataURL(file);
+  });
+  return {
+    inlineData: {
+      data: await base64EncodedDataPromise,
+      mimeType: file.type,
+    },
   };
-
-  return (
-    <div className="relative my-2">
-      <pre className="bg-gray-800 text-gray-200 p-3 pr-12 rounded-lg overflow-x-auto text-sm">
-        <code>{code}</code>
-      </pre>
-      <button
-        onClick={handleCopy}
-        className="absolute top-2 right-2 p-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-indigo-500"
-        aria-label={isCopied ? 'Copied!' : 'Copy code'}
-      >
-        {isCopied ? (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-          </svg>
-        ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-        )}
-      </button>
-    </div>
-  );
 };
 
-interface ChatMessageProps {
-  message: Message;
-}
-
-const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
-  const isBot = message.sender === 'bot';
-  const parts = message.text.split(/(```[\s\S]*?```)/g);
-
-  return (
-    <div className={`flex items-start gap-3 my-4 ${isBot ? 'justify-start' : 'justify-end'}`}>
-      {isBot && <BotIcon />}
-      <div className={`max-w-md lg:max-w-2xl p-4 rounded-2xl ${isBot ? 'bg-gray-700 text-gray-200 rounded-tl-none' : 'bg-blue-600 text-white rounded-br-none'}`}>
-        {parts.map((part, index) => {
-          if (part.startsWith('```')) {
-            const code = part.replace(/^```(?:\w+\n)?|```$/g, '').trim();
-            return <CodeBlock key={index} code={code} />;
-          }
-          return <p key={index} className="whitespace-pre-wrap">{part}</p>;
-        })}
-      </div>
-       {!isBot && <UserIcon />}
-    </div>
-  );
+const dataUrlToFile = async (dataUrl: string, fileName: string): Promise<File> => {
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    return new File([blob], fileName, { type: blob.type });
 };
 
-const TypingIndicator: React.FC = () => (
-  <div className="flex items-start gap-3 my-4 justify-start">
-    <BotIcon />
-    <div className="max-w-md p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-tl-none flex items-center space-x-1">
-      <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></span>
-      <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></span>
-      <span className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></span>
-    </div>
-  </div>
-);
+// --- UI Components ---
 
-
-interface ChatWindowProps {
-  messages: Message[];
-  isLoading: boolean;
-}
-
-const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isLoading }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
-
-  return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-6">
-      <div className="max-w-4xl mx-auto">
-        {messages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} />
-        ))}
-        {isLoading && <TypingIndicator />}
-        <div ref={scrollRef} />
-      </div>
-    </div>
-  );
-};
-
-interface ChatInputProps {
-  onSendMessage: (text: string) => void;
-  isLoading: boolean;
-}
-
-const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading }) => {
-  const [text, setText] = useState('');
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (text.trim()) {
-      onSendMessage(text);
-      setText('');
-    }
-  };
-
-  return (
-    <div className="bg-gray-800 p-4 border-t border-gray-700 sticky bottom-0">
-      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto flex items-center gap-3">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Ask Gemini anything..."
-          className="flex-1 bg-gray-700 text-gray-200 rounded-full py-3 px-5 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200"
-          disabled={isLoading}
-        />
-        <button
-          type="submit"
-          disabled={isLoading || !text.trim()}
-          className="bg-indigo-600 text-white rounded-full p-3 hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed transition duration-200"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
-            <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
-          </svg>
-        </button>
-      </form>
-    </div>
-  );
-};
-
-interface HeaderProps {
-    onClearChat: () => void;
-}
-
-const Header: React.FC<HeaderProps> = ({ onClearChat }) => (
-    <div className="bg-gray-800/80 backdrop-blur-sm p-4 border-b border-gray-700 sticky top-0 z-10">
+const Header: React.FC = () => (
+    <header className="bg-gray-800/80 backdrop-blur-sm p-4 border-b border-gray-700 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto flex items-center justify-center relative">
-            <h1 className="text-xl font-bold text-white">Gemini AI Chatbot</h1>
-            <button
-                onClick={onClearChat}
-                className="absolute right-0 p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white transition-colors duration-200"
-                aria-label="Clear chat"
-                title="Clear chat"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            <h1 className="text-xl font-bold text-white flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-yellow-400">
+                  <path d="M11.25 3.75c-.265 0-.52.023-.772.066C7.265 4.14 5.33 6.324 5.33 9.013v3.414c0 1.246.363 2.428 1.025 3.445l.13.152c.264.308.54.598.828.872.29.276.59.54.898.792a.75.75 0 0 1-.822 1.256c-.33-.269-.646-.554-.954-.852-.303-.293-.594-.593-.872-.9-.705-1.096-1.076-2.37-1.076-3.71v-3.414c0-3.31 2.55-6.088 5.82-6.262.279-.02.557-.03.837-.03h.004c3.456 0 6.25 2.794 6.25 6.25v3.414c0 1.34-.37 2.614-1.076 3.71-.278.307-.57.607-.872.9-.308.298-.624.583-.954.852a.75.75 0 1 1-.822-1.256c.309-.252.608-.516.898-.792.289-.274.564-.564.828-.872l.13-.152c.662-1.017 1.025-2.199 1.025-3.445v-3.414c0-2.69-1.936-4.874-4.508-5.197A6.723 6.723 0 0 0 12.75 3.75h-1.5Z" />
                 </svg>
-            </button>
+                Nano Banana Image Editor
+            </h1>
         </div>
-    </div>
+    </header>
 );
 
+const LoadingSpinner: React.FC = () => (
+  <div className="absolute inset-0 bg-gray-900/70 flex flex-col items-center justify-center z-20 backdrop-blur-sm">
+    <svg className="animate-spin h-10 w-10 text-white mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+    <p className="text-lg text-white">Generating your image...</p>
+    <p className="text-sm text-gray-400">This may take a moment.</p>
+  </div>
+);
 
 // --- Main App Component ---
 
-const initialMessage: Message = {
-    id: 'init',
-    text: 'Hello! I am Gemini. How can I assist you today?',
-    sender: 'bot'
-};
-
 function App() {
-  const [messages, setMessages] = useState<Message[]>([initialMessage]);
+  const [ai, setAi] = useState<GoogleGenAI | null>(null);
+  const [image, setImage] = useState<ImageState | null>(null);
+  const [prompt, setPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const aiRef = useRef<GoogleGenAI | null>(null);
-  const chatRef = useRef<Chat | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      aiRef.current = ai;
-      chatRef.current = ai.chats.create({
-        model: 'gemini-2.5-flash',
-        history: [],
-      });
-    } catch (error) {
-        console.error("Failed to initialize Gemini AI:", error);
-         setMessages(prev => [...prev, {
-            id: 'error-init',
-            text: 'Error: Could not initialize the AI model. Please check your API key configuration.',
-            sender: 'bot'
-        }]);
+      const genAI = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      setAi(genAI);
+    } catch (e) {
+      console.error(e);
+      setError('Failed to initialize the AI. Please check your API key configuration.');
     }
   }, []);
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim() || isLoading || !chatRef.current) return;
-
-    const userMessage: Message = { id: Date.now().toString(), text, sender: 'user' };
-    setMessages(prev => [...prev, userMessage]);
-    setIsLoading(true);
-    
-    try {
-      const result = await chatRef.current.sendMessage({ message: text });
-      const botResponse = result.text;
-      const botMessage: Message = { id: (Date.now() + 1).toString(), text: botResponse, sender: 'bot' };
-      setMessages(prev => [...prev, botMessage]);
-    } catch (error) {
-      console.error("Error sending message:", error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I'm sorry, but I encountered an error. Please try again.",
-        sender: 'bot',
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        setError('Please upload a valid image file (e.g., JPEG, PNG).');
+        return;
+      }
+      setImage({
+        file: file,
+        previewUrl: URL.createObjectURL(file),
+      });
+      setError(null);
     }
   };
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
   
-  const handleClearChat = () => {
-    if (window.confirm("Are you sure you want to clear the entire chat history?")) {
-        setMessages([initialMessage]);
-        if (aiRef.current) {
-            chatRef.current = aiRef.current.chats.create({
-                model: 'gemini-2.5-flash',
-                history: [],
-            });
-        }
+  const resetApp = () => {
+    setImage(null);
+    setPrompt('');
+    setError(null);
+    // Revoke the old object URL to free up memory
+    if (image?.previewUrl) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+  }
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ai || !image || !prompt.trim() || isLoading) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const imagePart = await fileToGenerativePart(image.file);
+      const textPart = { text: prompt };
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: { parts: [imagePart, textPart] },
+        config: {
+          responseModalities: [Modality.IMAGE],
+        },
+      });
+      
+      const resultPart = response.candidates?.[0]?.content?.parts[0];
+      if (resultPart?.inlineData) {
+        const { data, mimeType } = resultPart.inlineData;
+        const newDataUrl = `data:${mimeType};base64,${data}`;
+        const newFile = await dataUrlToFile(newDataUrl, `edited-${image.file.name}`);
+        
+        // Revoke the old object URL before setting the new one
+        URL.revokeObjectURL(image.previewUrl);
+        
+        setImage({
+            file: newFile,
+            previewUrl: newDataUrl
+        });
+        setPrompt('');
+      } else {
+        throw new Error('No image was generated. The prompt might be unsafe or unsupported. Please try a different prompt.');
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'An error occurred while editing the image.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-gray-900">
-        <Header onClearChat={handleClearChat} />
-        <ChatWindow messages={messages} isLoading={isLoading} />
-        <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+      <Header />
+      <main className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center">
+        <div className="w-full max-w-2xl flex-1 flex flex-col items-center">
+        
+          {error && (
+            <div className="bg-red-500/20 border border-red-500 text-red-300 p-3 rounded-lg w-full mb-4 text-center">
+              {error}
+            </div>
+          )}
+
+          {!image ? (
+            <div 
+              className="w-full flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-600 rounded-2xl hover:border-indigo-500 hover:bg-gray-800/50 transition-colors duration-300 cursor-pointer"
+              onClick={triggerFileUpload}
+              onDrop={(e) => { e.preventDefault(); handleFileChange({ target: { files: e.dataTransfer.files } } as any); }}
+              onDragOver={(e) => e.preventDefault()}
+            >
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+              <div className="text-center p-8">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-16 h-16 mx-auto text-gray-500 mb-4">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                </svg>
+                <h2 className="text-xl font-semibold text-white">Upload an Image</h2>
+                <p className="text-gray-400 mt-1">Click to browse or drag and drop here</p>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full flex-1 flex flex-col items-center relative">
+              {isLoading && <LoadingSpinner />}
+              <div className="w-full mb-4 rounded-lg overflow-hidden shadow-lg border border-gray-700">
+                  <img src={image.previewUrl} alt="Editable image" className="w-full h-auto max-h-[60vh] object-contain bg-gray-800" />
+              </div>
+
+              <form onSubmit={handleEdit} className="w-full flex flex-col gap-4">
+                 <div className="flex-1">
+                     <label htmlFor="prompt-input" className="sr-only">Edit Prompt</label>
+                     <input
+                      id="prompt-input"
+                      type="text"
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="e.g., Add a retro filter, make the background blurry..."
+                      className="w-full bg-gray-700 text-gray-200 rounded-lg py-3 px-5 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-200"
+                      disabled={isLoading}
+                    />
+                 </div>
+                <div className="flex gap-4">
+                  <button
+                    type="button"
+                    onClick={resetApp}
+                    disabled={isLoading}
+                    className="flex-1 bg-gray-600 text-white rounded-lg p-3 hover:bg-gray-500 disabled:bg-gray-700 disabled:cursor-not-allowed transition duration-200"
+                  >
+                    Upload New
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isLoading || !prompt.trim()}
+                    className="flex-1 bg-indigo-600 text-white rounded-lg p-3 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed transition duration-200 flex items-center justify-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                      <path d="m9.521 2.262-.256.495.256-.495Zm-1.428 15.475.256-.495-.256.495Zm-.256-.495 8.95-17.304-1.128-.582-8.95 17.304 1.128.582Zm-1.185-1.48L.347 9.81l-1.128.583 6.305 6.452 1.128-.582Z M10.42 17.15l6.305-6.452-1.128-.582-6.305 6.452 1.128.582ZM9.265 1.68l-8.95 17.304 1.128.582 8.95-17.304-1.128-.582Z" />
+                      <path d="M8.093 17.737a.75.75 0 0 1-1.06 0l-6.306-6.452a.75.75 0 0 1 1.06-1.06l6.306 6.452a.75.75 0 0 1 0 1.06Z" />
+                      <path d="M9.521 2.262a.75.75 0 0 1 1.06 0l8.95 17.304a.75.75 0 0 1-1.06 1.06l-8.95-17.304a.75.75 0 0 1 0-1.06Z" />
+                    </svg>
+                    Generate
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }

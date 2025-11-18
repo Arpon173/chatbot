@@ -1,5 +1,5 @@
 {
-  "name": "Gemini AI Chatbot",
-  "description": "A responsive chatbot application powered by the Gemini API. Users can ask questions and receive intelligent, conversational responses in a clean and modern chat interface.",
+  "name": "Nano Banana Image Editor",
+  "description": "Edit images using text prompts with the power of Gemini 2.5 Flash Image. Upload a photo, describe your desired changes, and let the AI generate a new version.",
   "requestFramePermissions": []
 }

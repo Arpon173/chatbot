@@ -151,7 +151,7 @@ function App() {
 
   useEffect(() => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       chatRef.current = ai.chats.create({
         model: 'gemini-2.5-flash',
         history: [],

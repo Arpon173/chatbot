@@ -162,10 +162,24 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, isLoading }) => {
   );
 };
 
-const Header: React.FC = () => (
+interface HeaderProps {
+    onClearChat: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ onClearChat }) => (
     <div className="bg-gray-800/80 backdrop-blur-sm p-4 border-b border-gray-700 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto flex items-center justify-center">
+        <div className="max-w-4xl mx-auto flex items-center justify-center relative">
             <h1 className="text-xl font-bold text-white">Gemini AI Chatbot</h1>
+            <button
+                onClick={onClearChat}
+                className="absolute right-0 p-2 rounded-full hover:bg-gray-700 text-gray-400 hover:text-white transition-colors duration-200"
+                aria-label="Clear chat"
+                title="Clear chat"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            </button>
         </div>
     </div>
 );
@@ -173,20 +187,22 @@ const Header: React.FC = () => (
 
 // --- Main App Component ---
 
+const initialMessage: Message = {
+    id: 'init',
+    text: 'Hello! I am Gemini. How can I assist you today?',
+    sender: 'bot'
+};
+
 function App() {
-  const [messages, setMessages] = useState<Message[]>([
-      {
-        id: 'init',
-        text: 'Hello! I am Gemini. How can I assist you today?',
-        sender: 'bot'
-      }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([initialMessage]);
   const [isLoading, setIsLoading] = useState(false);
+  const aiRef = useRef<GoogleGenAI | null>(null);
   const chatRef = useRef<Chat | null>(null);
 
   useEffect(() => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      aiRef.current = ai;
       chatRef.current = ai.chats.create({
         model: 'gemini-2.5-flash',
         history: [],
@@ -225,10 +241,22 @@ function App() {
       setIsLoading(false);
     }
   };
+  
+  const handleClearChat = () => {
+    if (window.confirm("Are you sure you want to clear the entire chat history?")) {
+        setMessages([initialMessage]);
+        if (aiRef.current) {
+            chatRef.current = aiRef.current.chats.create({
+                model: 'gemini-2.5-flash',
+                history: [],
+            });
+        }
+    }
+  };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-gray-900">
-        <Header />
+        <Header onClearChat={handleClearChat} />
         <ChatWindow messages={messages} isLoading={isLoading} />
         <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
     </div>
